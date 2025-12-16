@@ -1,0 +1,96 @@
+services:
+  db-primary:
+    image: bitnami/postgresql:latest
+    container_name: db-primary
+    environment:
+      - POSTGRESQL_USERNAME=app
+      - POSTGRESQL_PASSWORD=app_pwd
+      - POSTGRESQL_DATABASE=appdb
+      - POSTGRESQL_REPLICATION_MODE=master
+      - POSTGRESQL_REPLICATION_USER=repl
+      - POSTGRESQL_REPLICATION_PASSWORD=repl_pwd
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-primary-data:/bitnami/postgresql
+    networks:
+      - tp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db-replica:
+    image: bitnami/postgresql:latest
+    container_name: db-replica
+    depends_on:
+      db-primary:
+        condition: service_healthy
+    environment:
+      - POSTGRESQL_USERNAME=app
+      - POSTGRESQL_PASSWORD=app_pwd
+      - POSTGRESQL_DATABASE=appdb
+      - POSTGRESQL_REPLICATION_MODE=slave
+      - POSTGRESQL_MASTER_HOST=db-primary
+      - POSTGRESQL_MASTER_PORT_NUMBER=5432
+      - POSTGRESQL_REPLICATION_USER=repl
+      - POSTGRESQL_REPLICATION_PASSWORD=repl_pwd
+    ports:
+      - "5433:5432"
+    volumes:
+      - db-replica-data:/bitnami/postgresql
+    networks:
+      - tp-network
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - tp-network
+
+  haproxy:
+    image: haproxy:2.9
+    container_name: haproxy
+    depends_on:
+      - db-primary
+      - db-replica
+    ports:
+      - "5439:5432"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - tp-network
+
+  api:
+    build: ./api
+    container_name: api
+    depends_on:
+      - db-primary
+      - db-replica
+      - redis
+      - haproxy
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_PRIMARY_HOST=haproxy
+      - DB_PRIMARY_PORT=5432
+      - DB_REPLICA_HOST=db-replica
+      - DB_REPLICA_PORT=5432
+      - DB_USER=app
+      - DB_PASSWORD=app_pwd
+      - DB_NAME=appdb
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - tp-network
+
+networks:
+  tp-network:
+    driver: bridge
+
+volumes:
+  db-primary-data:
+  db-replica-data:
